@@ -1,8 +1,11 @@
 module sanic.loop;
 
+import std.stdio;
+
 import core.thread : Fiber;
 import core.sync.mutex : Mutex;
 
+import sanic.util.log;
 import sanic.uv.loop : UVLoop;
 import sanic.uv.timer : UVTimer;
 
@@ -16,27 +19,41 @@ enum SchedulerMode {
   A coroutine is a single, cooperative fiber.
 */
 struct Coroutine {
-  Scheduler scheduler;
+  EventLoop loop;
   Fiber fiber;
-  uint data = 0;
   void* ctx;
 
   void run() {
+    log.dbg("[C%s] run", &this);
     currentCoroutine = &this;
     this.fiber.call();
+  }
+
+  void yield() {
+    log.dbg("[C%s] yield", &this);
+    currentCoroutine = null;
+    Fiber.yield();
   }
 }
 
 /// The current coroutine
 static Coroutine* currentCoroutine;
 
+/// The automatic event loop for this thread, if created
+static EventLoop currentThreadLoop;
+
+EventLoop getLoop() {
+  if (!currentThreadLoop) currentThreadLoop = new EventLoop;
+  return currentThreadLoop;
+}
+
 /**
-  The scheduler is our base building block for fiber-based async programming. It
-  has knowledge about all the fibers in our current thread, and handles scheduling
-  them fairly.
+  The EventLoop is the base abstraction of interacting with sanic. It manages
+  all the scheduling and execution of coroutines in a single thread.
 */
-class Scheduler {
-  static UVLoop _loop;
+class EventLoop {
+  /// The UV Loop for this eventloop.
+  UVLoop loop;
 
   /// Mode this scheduler is operating in, can be swapped on the fly
   SchedulerMode mode = SchedulerMode.FIFO;
@@ -47,32 +64,23 @@ class Scheduler {
   // used to wait for coroutines if we don't have any
   Mutex _waitForCoroutines;
 
-  this() {}
-
-  @property UVLoop loop() {
-    if (!this._loop) this._loop = new UVLoop;
-    return this._loop;
+  this() {
+    this.loop = new UVLoop;
   }
 
-  void add(Coroutine* coro) {
+  /// Schedules a coroutine
+  void schedule(Coroutine* coro) {
+    log.dbg("[C%s] schedule", coro);
     // TODO scheduler may need to metadata here
     this.coroutines ~= coro;
     if (this._waitForCoroutines) this._waitForCoroutines.unlock();
   }
 
-  void spawn(void delegate() f) {
-    this.add(new Coroutine(this, new Fiber(f)));
-  }
-
-  void testSleep(ulong sleepms) {
-    // todo: gc
-    auto timer = new UVTimer(this.loop, () {
-      this.add(currentCoroutine);
-    }, sleepms);
-
-    currentCoroutine.ctx = cast(void*)timer;
-
-    Fiber.yield();
+  Coroutine* spawn(void delegate() f, bool schedule = true) {
+    auto coro = new Coroutine(this, new Fiber(f));
+    log.dbg("[C%s] spawn", coro);
+    if (schedule) this.schedule(coro);
+    return coro;
   }
 
   /// Runs the event loop until termination
@@ -93,6 +101,7 @@ class Scheduler {
 
   /// Runs the event loop for a single iteration
   void runOnce() {
+    log.dbg("Running event loop once in %s", this.mode);
     final switch (this.mode) {
       case SchedulerMode.FIFO:
         this.runOnceFIFO();
@@ -113,6 +122,7 @@ class Scheduler {
 
     this.coroutines.length = 0;
 
+    log.dbg("FIFO on %s coros", scheduled.length);
     foreach (coro; scheduled) {
       coro.run();
     }
@@ -125,18 +135,4 @@ class Scheduler {
   private void runOnceCOST() {
     throw new Exception("Not Implementted");
   }
-}
-
-unittest {
-  import std.stdio;
-  auto sched = new Scheduler();
-
-  sched.spawn(() {
-    writefln("TEST");
-    sched.testSleep(1000);
-    writefln("WOW");
-  });
-
-  sched.runOnce();
-  sched.runOnce();
 }

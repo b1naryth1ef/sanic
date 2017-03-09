@@ -63,24 +63,26 @@ class UVTimer {
 }
 
 unittest {
-  import std.stdio : writefln;
+  import sanic.util.log;
+  auto log = log.scoped("uv/timer");
+  scope (exit) log.commit();
 
   auto loop = new UVLoop;
 
   auto t1 = new UVTimer(loop, () {
-    writefln("T1 complete");
+    log("T1 completed");
   }, 100);
 
   auto t2 = new UVTimer(loop, () {
-    writefln("T2 complete");
+    log("T2 completed");
   }, 150);
 
   auto t3 = new UVTimer(loop, () {
-    writefln("T3 complete");
+    log("T3 completed");
     loop.stop();
   }, 200);
 
-  writefln("\n\nStarting loop");
+  log("Starting loop...");
   loop.run();
 
   destroy(loop);
