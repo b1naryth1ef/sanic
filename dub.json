@@ -1,0 +1,11 @@
+{
+  "name": "sanic",
+  "targetType": "library",
+  "description": "fast networking",
+  "authors": ["b1naryth1ef"],
+  "homepage": "http://github.com/b1naryth1ef/sanic",
+  "license": "zlib",
+  "libs": [
+    "uv"
+  ]
+}
