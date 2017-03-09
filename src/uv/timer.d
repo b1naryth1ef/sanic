@@ -80,7 +80,7 @@ unittest {
     loop.stop();
   }, 200);
 
-  writefln("Starting loop");
+  writefln("\n\nStarting loop");
   loop.run();
 
   destroy(loop);

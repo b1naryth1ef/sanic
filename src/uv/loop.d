@@ -48,6 +48,10 @@ class UVLoop {
     uv_run(this.loop, uv_run_mode.UV_RUN_DEFAULT);
   }
 
+  void runOnce() {
+    uv_run(this.loop, uv_run_mode.UV_RUN_ONCE);
+  }
+
   void stop() {
     uv_stop(this.loop);
   }

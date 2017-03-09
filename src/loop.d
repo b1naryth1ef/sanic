@@ -3,6 +3,9 @@ module sanic.loop;
 import core.thread : Fiber;
 import core.sync.mutex : Mutex;
 
+import sanic.uv.loop : UVLoop;
+import sanic.uv.timer : UVTimer;
+
 enum SchedulerMode {
   FIFO, // FIFO scheduler provides _even_ but not _fair_ scheduling
   PRIO, // PRIO scheduler provides priority based scheduling
@@ -15,7 +18,8 @@ enum SchedulerMode {
 struct Coroutine {
   Scheduler scheduler;
   Fiber fiber;
-  uint data;
+  uint data = 0;
+  void* ctx;
 
   void run() {
     currentCoroutine = &this;
@@ -32,16 +36,44 @@ static Coroutine* currentCoroutine;
   them fairly.
 */
 class Scheduler {
+  static UVLoop _loop;
+
   /// Mode this scheduler is operating in, can be swapped on the fly
   SchedulerMode mode = SchedulerMode.FIFO;
 
   /// Coroutines that are a member of this scheduler
-  Coroutine[] coroutines;
+  Coroutine*[] coroutines;
 
   // used to wait for coroutines if we don't have any
   Mutex _waitForCoroutines;
 
   this() {}
+
+  @property UVLoop loop() {
+    if (!this._loop) this._loop = new UVLoop;
+    return this._loop;
+  }
+
+  void add(Coroutine* coro) {
+    // TODO scheduler may need to metadata here
+    this.coroutines ~= coro;
+    if (this._waitForCoroutines) this._waitForCoroutines.unlock();
+  }
+
+  void spawn(void delegate() f) {
+    this.add(new Coroutine(this, new Fiber(f)));
+  }
+
+  void testSleep(ulong sleepms) {
+    // todo: gc
+    auto timer = new UVTimer(this.loop, () {
+      this.add(currentCoroutine);
+    }, sleepms);
+
+    currentCoroutine.ctx = cast(void*)timer;
+
+    Fiber.yield();
+  }
 
   /// Runs the event loop until termination
   void runForever() {
@@ -72,10 +104,16 @@ class Scheduler {
         this.runOnceCOST();
         break;
     }
+
+    this.loop.runOnce();
   }
 
   private void runOnceFIFO() {
-    foreach (coro; this.coroutines) {
+    Coroutine*[] scheduled = this.coroutines;
+
+    this.coroutines.length = 0;
+
+    foreach (coro; scheduled) {
       coro.run();
     }
   }
@@ -90,6 +128,15 @@ class Scheduler {
 }
 
 unittest {
+  import std.stdio;
   auto sched = new Scheduler();
+
+  sched.spawn(() {
+    writefln("TEST");
+    sched.testSleep(1000);
+    writefln("WOW");
+  });
+
+  sched.runOnce();
   sched.runOnce();
 }
